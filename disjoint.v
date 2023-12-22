@@ -7,36 +7,31 @@ Inductive expr : Set :=
   | e_assgn : nat -> expr -> expr
   | e_seq : expr -> expr -> expr.
 
-Inductive store : Set :=
-  | s_nil : store
-  | s_cons : (nat * nat) -> store -> store.
+Module Store.
+  Definition t := nat -> option nat.
 
-Fixpoint store_get (s : store) (l : nat) : option nat :=
-  match s with
-  | s_nil => None
-  | s_cons (l', n) s => if Nat.eqb l l' then Some n else store_get s l
-  end.
+  Definition empty : t := fun l => None.
 
-Fixpoint store_remove (s : store) (l : nat) : store :=
-  match s with
-  | s_nil => s_nil
-  | s_cons (l', n) s => if Nat.eqb l l' then s else s_cons (l', n) (store_remove s l)
-  end.
+  Definition get (s : t) x := s x.
 
-Function store_add (s : store) (l : nat) (n : nat) : store :=
-  s_cons (l, n) (store_remove s l).
+  Definition remove (s : t) (l : nat) : t :=
+    fun l' => if Nat.eqb l l' then None else get s l'.
+
+  Definition add (s : t) (l : nat) (n : nat) : t :=
+    fun l' => if Nat.eqb l l' then Some n else get s l'.
+End Store.
 
 Inductive transition e0 s0 e1 s1 : Prop :=
   | t_deref : forall l n,
       e0 = e_deref l ->
       e1 = e_n n ->
-      Some n = store_get s0 l ->
+      Some n = Store.get s0 l ->
       s0 = s1 ->
       transition e0 s0 e1 s1
   | t_assgn1 : forall l n,
       e0 = e_assgn l (e_n n) ->
       e1 = e_skip ->
-      s1 = store_add s0 l n ->
+      s1 = Store.add s0 l n ->
       transition e0 s0 e1 s1
   | t_assgn2 : forall l e0' e1',
       e0 = e_assgn l e0' ->
