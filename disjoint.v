@@ -1,4 +1,11 @@
 Require Import FunInd.
+Require Import FunctionalExtensionality.
+Require Import Ensembles.
+
+Arguments Empty_set {U}.
+Arguments Singleton {U}.
+Arguments Union {U}.
+Arguments Included {U}.
 
 Inductive expr : Set :=
   | e_n : nat -> expr
@@ -7,31 +14,79 @@ Inductive expr : Set :=
   | e_assgn : nat -> expr -> expr
   | e_seq : expr -> expr -> expr.
 
-Module Store.
+Fixpoint loc (e : expr) : Ensemble nat :=
+  match e with
+  | e_n _ => Empty_set
+  | e_skip => Empty_set
+  | e_deref l => Singleton l
+  | e_assgn l e => Union (Singleton l) (loc e)
+  | e_seq e1 e2 => Union (loc e1) (loc e2)
+  end.
+
+Module S.
   Definition t := nat -> option nat.
 
-  Definition empty : t := fun l => None.
+  Definition empty : t := fun _ => None.
 
-  Definition get (s : t) x := s x.
+  Definition get (s : t) l := s l.
 
   Definition remove (s : t) (l : nat) : t :=
     fun l' => if Nat.eqb l l' then None else get s l'.
 
   Definition add (s : t) (l : nat) (n : nat) : t :=
     fun l' => if Nat.eqb l l' then Some n else get s l'.
-End Store.
+
+  Definition dom (s : t) : nat -> bool :=
+    fun l => match get s l with
+      | None => false
+      | Some _ => true
+      end.
+
+  Lemma get_eq_domain : forall s l v, get s l = Some v -> dom s l = true.
+  Proof.
+    intros. unfold dom. rewrite H. reflexivity.
+  Qed.
+
+  Lemma domain_eq_get : forall s l, dom s l = true -> exists v, get s l = Some v.
+  Proof.
+    intros. unfold dom in H. unfold get in H. case (s l) eqn:H1 in H.
+    - exists n. unfold get. assumption.
+    - inversion H.
+  Qed.
+
+  Lemma disjoint_absurd : forall s0 s1 l v0 v1,
+    get s0 l = Some v0 ->
+    get s1 l = Some v1 ->
+    dom s0 l = false \/ dom s1 l = false -> False.
+  Proof.
+    intros. destruct H1.
+    - apply get_eq_domain in H. rewrite H in H1. inversion H1.
+    - apply get_eq_domain in H0. rewrite H0 in H1. inversion H1.
+  Qed.
+
+  Definition disjoint_union (s0 s1 : t) : nat -> option nat :=
+    fun l =>
+    match get s0 l, get s1 l with
+    | Some v0, Some v1 => None
+    | Some v, None => Some v
+    | None, Some v => Some v
+    | None, None => None
+    end.
+End S.
+
+Notation "f + g" := (S.disjoint_union f g).
 
 Inductive transition e0 s0 e1 s1 : Prop :=
   | t_deref : forall l n,
       e0 = e_deref l ->
       e1 = e_n n ->
-      Some n = Store.get s0 l ->
+      Some n = S.get s0 l ->
       s0 = s1 ->
       transition e0 s0 e1 s1
   | t_assgn1 : forall l n,
       e0 = e_assgn l (e_n n) ->
       e1 = e_skip ->
-      s1 = Store.add s0 l n ->
+      s1 = S.add s0 l n ->
       transition e0 s0 e1 s1
   | t_assgn2 : forall l e0' e1',
       e0 = e_assgn l e0' ->
