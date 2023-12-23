@@ -1,6 +1,6 @@
 Require Import FunInd.
 Require Import FunctionalExtensionality.
-Require Import Nat.
+Require Import PeanoNat.
 Require Import Specif.
 
 Inductive expr : Set :=
@@ -78,7 +78,9 @@ Module S.
     end.
 End S.
 
-Notation "f + g" := (S.disjoint_union f g).
+Axiom functional_extensionality :
+  forall {X Y : Type} {f g : X -> Y},
+  (forall (x : X), f x = g x) -> f = g.
 
 Inductive transition : expr -> S.t -> expr -> S.t -> Prop :=
   | t_deref : forall e0 s0 e1 s1 l n,
@@ -109,6 +111,7 @@ Inductive transition : expr -> S.t -> expr -> S.t -> Prop :=
 
 Notation "[ e0 , s0 ] '~>' [ e1 , s1 ]" := (transition e0 s0 e1 s1) (at level 20).
 Notation "[ e0 , s0 ] = [ e1 , s1 ]" := (e0 = e1 /\ s0 = s1) (at level 20).
+Notation "f + g" := (S.disjoint_union f g).
 
 Lemma one_step_determinacy_expr : forall e s e0 s0 e1 s1,
   [e, s] ~> [e0, s0] -> [e, s] ~> [e1, s1] -> [e0, s0] = [e1, s1].
@@ -143,14 +146,20 @@ Proof.
   rewrite <- H. rewrite H0. reflexivity.
 Qed.
 
-(* Requires function extensionality to show equality of stores *)
 Lemma store_add_disjoint : forall s s' l n,
   S.dom s' l = false -> S.add s l n + s' = S.add (s + s') l n.
 Proof.
   intros.
   apply (S.dom_eq_get s' l false) in H.
-  unfold S.add. unfold S.disjoint_union.
-Admitted.
+  unfold S.add.
+  unfold S.disjoint_union.
+  unfold S.get.
+  apply functional_extensionality; intro.
+  case_eq (Nat.eqb l x); intro.
+  - apply Nat.eqb_eq in H0. subst.
+    unfold S.get in H. rewrite H. reflexivity.
+  - reflexivity.
+Qed.
 
 Lemma irrelevant_store_can_be_added : forall e s e1 s1 s0,
   [e, s] ~> [e1, s1] ->
@@ -166,14 +175,14 @@ Proof.
       rewrite <- H2 in Hs1. discriminate.
   - apply (t_assgn1 _ _ _ _ l n); try reflexivity.
     specialize (H0 l). destruct H0 as [Hs0|Hs1].
-    +
-Admitted.
-
-Lemma nat_eqb_refl : forall x, (x =? x) = true.
-Proof.
-  intros. induction x.
-  - unfold Nat.eqb. reflexivity.
-  - unfold Nat.eqb. apply IHx.
+    + apply store_add_disjoint. assumption.
+    + unfold S.dom in Hs1. unfold S.get in Hs1. unfold S.add in Hs1.
+      rewrite (Nat.eqb_refl l) in Hs1. inversion Hs1.
+  - apply (t_assgn2 _ _ _ _ l e0' e1'); try reflexivity.
+    apply IHtransition in H0. assumption.
+  - apply (t_seq1 _ _ _ _); try reflexivity.
+  - apply (t_seq2 _ _ _ _ e0' e1' e''); try reflexivity.
+    apply IHtransition in H0. assumption.
 Qed.
 
 Lemma irrelevant_store_can_be_removed : forall e s s0 e1 s1,
