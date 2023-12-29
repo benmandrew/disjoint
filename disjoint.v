@@ -25,12 +25,11 @@ Fixpoint loc (e : expr) : nat -> bool :=
 Definition subset (s0 s1 : nat -> bool) : Prop :=
   forall l, s0 l = true -> s1 l = true.
 
+(* Partial store supporting decidable disjoint union *)
 Module S.
   Definition t := nat -> option nat.
 
   Definition empty : t := fun _ => None.
-
-  (* Definition get (s : t) l := s l. *)
 
   Definition remove (s : t) (l : nat) : t :=
     fun l' => if l =? l' then None else s l'.
@@ -38,61 +37,13 @@ Module S.
   Definition add (s : t) (l : nat) (n : nat) : t :=
     fun l' => if l =? l' then Some n else s l'.
 
-  Definition dom (s : t) : nat -> bool :=
-    fun l => match s l with
-      | None => false
-      | Some _ => true
-      end.
-
-  Lemma get_eq_dom : forall s l v,
-    s l = v ->
-    dom s l = (match v with None => false | Some _ => true end).
-  Proof.
-    intros. unfold dom. subst. reflexivity.
-  Qed.
-
-  Lemma dom_eq_get : forall s l b,
-    dom s l = b ->
-    (match b with false => s l = None | true => exists v, s l = Some v end).
-  Proof.
-    intros. unfold dom in H. case (s l) eqn:H1 in H; subst.
-    - exists n. assumption.
-    - assumption.
-  Qed.
-
-  Lemma disjoint_absurd : forall s0 s1 l v0 v1,
-    s0 l = Some v0 ->
-    s1 l = Some v1 ->
-    dom s0 l = false \/ dom s1 l = false -> False.
-  Proof.
-    intros. destruct H1.
-    - apply get_eq_dom in H. rewrite H in H1. inversion H1.
-    - apply get_eq_dom in H0. rewrite H0 in H1. inversion H1.
-  Qed.
-
-  Definition disjoint (s0 s1 : t) : Prop :=
-    forall l, s0 l = None \/ s1 l = None.
-
   Definition disjoint_dec (s0 s1 : t) : Set :=
     forall l, { s0 l = None } + { s1 l = None }.
 
-  Definition disjoint_l (s0 s1 : t) l : Prop :=
-    s0 l = None \/ s1 l = None.
+  Definition disjoint_dec_l (s0 s1 : t) l : Set :=
+    { s0 l = None } + { s1 l = None }.
 
-  Definition disjoint_l_dec (s0 s1 : t) l : Set :=
-    { s0 l = None } + { s1 l = None}.
-
-  Lemma lem : forall (v0 v1 : nat),
-    (Some v0 = None \/ Some v1 = None) -> False.
-  Proof.
-    intros. destruct H; discriminate.
-  Qed.
-
-  Inductive Option : Set :=
-  | Fail : Option
-  | Ok : bool -> Option.
-
-  Definition disjoint_union :
+  (* Definition disjoint_union :
       forall s0 s1, (disjoint_dec s0 s1) -> nat -> option nat.
     refine (
       fun s0 s1 pf l =>
@@ -103,34 +54,34 @@ Module S.
       | None, None => None
       end).
     auto.
+  Defined. *)
+
+    (*  return
+      ({v0' = None} + {v1' = None}) -> option nat *)
+
+  Lemma lem : forall (v0 v1 : nat),
+    {Some v0 = None} + {Some v1 = None} -> False.
+  Proof.
+    intros. destruct H; discriminate.
+  Qed.
+
+  (* (s0 s1 : t) (pf : disjoint_dec s0 s1) (l : nat) *)
+
+  Definition disjoint_union :
+      forall s0 s1, (disjoint_dec s0 s1) -> nat -> option nat.
+    refine (
+      fun s0 s1 pf l =>
+      (match s0 l as v0', s1 l as v1' return
+        {v0' = None} + {v1' = None} -> option nat
+      with
+      | Some v0, Some v1 => fun pf' => match lem v0 v1 pf' with end
+      | Some v, None => fun _ => Some v
+      | None, Some v => fun _ => Some v
+      | None, None => fun _ => None
+      end) _).
+    destruct (pf l); auto.
   Defined.
-
-  (* Program Definition disjoint_union
-      (s0 s1 : t) (pf : disjoint s0 s1) (l : nat) : option nat :=
-    match s0 l as v0, s1 l as v1 with
-    | Some v0, Some v1 => !
-    | Some v, None => Some v
-    | None, Some v => Some v
-    | None, None => None
-    end.
-    Next Obligation.
-      unfold disjoint in pf. specialize (pf l). destruct pf as [Hs0|Hs1].
-      - rewrite Hs0 in Heq_v0. discriminate.
-      - rewrite Hs1 in Heq_v1. discriminate.
-    Defined. *)
-
-  (* Definition disjoint_union (s0 s1 : t) (l : nat) :
-      (disjoint s0 s1) -> option nat :=
-    match s0 l as v0, s1 l as v1 return
-      (forall _, v0 = None \/ v1 = None) -> option nat
-    with
-    | Some v0, Some v1 =>
-      fun (pf : forall _, Some v0 = None \/ Some v1 = None) =>
-        match lem v0 v1 (pf l) with end
-    | Some v, None => fun _ => Some v
-    | None, Some v => fun _ => Some v
-    | None, None => fun _ => None
-    end. *)
+    
 End S.
 
 Axiom functional_extensionality :
@@ -148,6 +99,7 @@ Inductive transition : expr -> S.t -> expr -> S.t -> Prop :=
       e0 = e_assgn l (e_n n) ->
       e1 = e_skip ->
       s1 = S.add s0 l n ->
+      (exists n', s0 l = Some n') ->
       transition e0 s0 e1 s1
   | t_assgn2 : forall e0 s0 e1 s1 l e0' e1',
       e0 = e_assgn l e0' ->
@@ -176,8 +128,8 @@ Proof.
   inversion Hl; inversion Hr; try discriminate; subst.
   - rewrite H in H7. inversion H7. rewrite H2 in H1.
     rewrite <- H1 in H9. inversion H9. constructor; reflexivity.
-  - rewrite H in H6. inversion H6. constructor; reflexivity.
-  - inversion H; inversion H6; subst. inversion H8; discriminate.
+  - rewrite H in H7. inversion H7. constructor; reflexivity.
+  - inversion H; inversion H7; subst. inversion H9; discriminate.
   - inversion H; inversion H6; subst. inversion H1; discriminate.
   - inversion H; inversion H6; subst.
     apply (IHe e1' s' e1'0 s'') in H1.
@@ -209,6 +161,7 @@ Proof.
   intros.
   cut (S.disjoint_dec (S.add s l n) s').
   - intros pf'. exists pf'.
+    unfold S.disjoint_union.
     unfold S.add.
     unfold S.disjoint_union.
     apply functional_extensionality; intro.
@@ -229,9 +182,7 @@ Proof.
 Qed.
 
 Lemma irrelevant_store_can_be_added : forall e s e1 s1 s0 pf0 pf1,
-  [e, s] ~> [e1, s1] ->
-  (* (S.disjoint_dec s1 s0) -> *)
-  [e, s + s0 | pf0] ~> [e1, s1 + s0 | pf1].
+  [e, s] ~> [e1, s1] -> [e, s + s0 | pf0] ~> [e1, s1 + s0 | pf1].
 Proof.
   intros.
   induction H; subst.
@@ -239,12 +190,32 @@ Proof.
     destruct (pf0 l).
     { rewrite e in H1. discriminate. }
     + unfold S.disjoint_union. rewrite <- H1. rewrite e. reflexivity.
-  - apply (t_assgn1 _ _ _ _ l n); try reflexivity.
-    destruct (pf0 l); destruct (pf1 l).
-    + admit.
-    + cut ({ pf' | (S.add s1 l n + s0 | pf') = S.add (s1 + s0 | pf0) l n }).
-      * intros. apply (proj2_sig H).
-      * apply (store_add_disjoint s1 s0 l pf0 e0 n).
+  - apply (t_assgn1 _ _ _ _ l n); try reflexivity; destruct H2 as [n' H2].
+    unfold S.disjoint_union.
+    + unfold S.add. unfold S.disjoint_union.
+      apply functional_extensionality. intros.
+      destruct_with_eqn (Nat.eqb l x).
+      destruct_with_eqn (s0 x).
+
+
+
+
+
+
+
+
+
+    (* destruct (pf0 l); destruct (pf1 l);
+    case_eq (Nat.eqb l x); intro.
+    + unfold S.add in e0. rewrite Nat.eqb_refl in e0. discriminate.
+    + unfold S.add in e0. rewrite Nat.eqb_refl in e0. discriminate.
+    + apply Nat.eqb_eq in H. subst. rewrite e0. reflexivity.
+    + case (s1 x); case (s0 x); intros.
+      * case_eq (Nat.eqb l n0); intros.
+        --apply Nat.eqb_eq in H0. subst. rewrite e. *)
+
+
+
 
   (* - apply (t_deref _ _ _ _ l n); try reflexivity.
     specialize (H0 l). destruct H0 as [Hs0|Hs1].
